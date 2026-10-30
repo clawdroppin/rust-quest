@@ -116,7 +116,7 @@ h2 { font-size: clamp(28px, 4vw, 42px); letter-spacing: -0.02em; line-height: 1.
   display: flex; flex-direction: column; transition: transform .2s, border-color .2s; }
 .build:hover { transform: translateY(-4px); border-color: var(--accent); }
 .build .pic { background: var(--bg2); height: 300px; display: grid; place-items: center; padding: 20px; overflow: hidden; }
-.build .pic img { max-height: 100%; width: auto; border-radius: 8px; box-shadow: 0 12px 30px rgba(0,0,0,.3); }
+.build .pic img { max-height: 260px; width: auto; object-fit: contain; border-radius: 8px; box-shadow: 0 12px 30px rgba(0,0,0,.3); }
 .build .pic.chat { font-family: "JetBrains Mono", monospace; font-size: 14px; padding: 24px; place-items: stretch; }
 .bubble { max-width: 80%; padding: 10px 14px; border-radius: 14px; margin: 6px 0; line-height: 1.45; font-family: Inter, sans-serif; }
 .bubble.me { margin-left: auto; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
