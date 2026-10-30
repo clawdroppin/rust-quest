@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rust Quest — learn to code, from zero to desktop apps</title>
+<meta name="description" content="A free, portable Windows app that teaches programming from zero in Rust: 73 hands-on lessons, real compiler feedback, four guided app builds and an optional local AI helper.">
+<meta property="og:title" content="Rust Quest">
+<meta property="og:description" content="Learn to code from zero, in Rust, until you can build your own desktop apps.">
+<meta property="og:image" content="img/course.png">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦀</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #fbf8f5; --bg2: #f3ede7; --card: #ffffff; --text: #1f1a17; --muted: #6b625c;
+  --line: #e6ddd5; --accent: #d9622b; --accent2: #b84a1a; --glow: rgba(217, 98, 43, .18);
+  --code-bg: #1d1a18; --code-text: #f2e9e1;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141110; --bg2: #1c1816; --card: #221d1a; --text: #f2ebe5; --muted: #a89c93;
+    --line: #342c27; --accent: #f07a3e; --accent2: #ff9a62; --glow: rgba(240, 122, 62, .22);
+    --code-bg: #0e0c0b; --code-text: #f2e9e1;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141110; --bg2: #1c1816; --card: #221d1a; --text: #f2ebe5; --muted: #a89c93;
+  --line: #342c27; --accent: #f07a3e; --accent2: #ff9a62; --glow: rgba(240, 122, 62, .22);
+  --code-bg: #0e0c0b; --code-text: #f2e9e1;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 17px/1.6 Inter, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); }
+img { max-width: 100%; display: block; }
+code, .mono { font-family: "JetBrains Mono", Consolas, monospace; font-size: .9em; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
+
+/* nav */
+nav { position: sticky; top: 0; z-index: 10; backdrop-filter: blur(12px);
+  background: color-mix(in srgb, var(--bg) 82%, transparent); border-bottom: 1px solid var(--line); }
+nav .wrap { display: flex; align-items: center; gap: 20px; height: 60px; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 19px; color: var(--text); text-decoration: none; }
+.brand span { color: var(--accent); }
+nav .links { margin-left: auto; display: flex; gap: 20px; align-items: center; }
+nav .links a { color: var(--muted); text-decoration: none; font-size: 15px; font-weight: 500; }
+nav .links a:hover { color: var(--text); }
+@media (max-width: 720px) { nav .links a.opt { display: none; } }
+
+/* buttons */
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 22px; border-radius: 12px;
+  font-weight: 600; text-decoration: none; transition: transform .15s, box-shadow .15s, background .15s; }
+.btn.primary { background: var(--accent); color: #fff; box-shadow: 0 8px 24px var(--glow); }
+.btn.primary:hover { transform: translateY(-2px); background: var(--accent2); }
+.btn.ghost { border: 1px solid var(--line); color: var(--text); background: var(--card); }
+.btn.ghost:hover { border-color: var(--accent); }
+.btn.small { padding: 7px 14px; font-size: 14px; border-radius: 10px; }
+
+/* hero */
+.hero { position: relative; padding: 80px 0 40px; text-align: center; overflow: hidden; }
+.hero::before { content: ""; position: absolute; inset: -40% -10% auto; height: 700px; z-index: -1;
+  background: radial-gradient(closest-side, var(--glow), transparent); }
+.pill { display: inline-block; padding: 5px 14px; border-radius: 99px; border: 1px solid var(--line);
+  background: var(--card); color: var(--muted); font-size: 14px; margin-bottom: 22px; }
+h1 { font-size: clamp(38px, 6.5vw, 68px); line-height: 1.05; letter-spacing: -0.03em; margin: 0 0 20px; font-weight: 800; }
+h1 em { font-style: normal; background: linear-gradient(90deg, var(--accent), #f0a03e);
+  -webkit-background-clip: text; background-clip: text; color: transparent; }
+.lead { font-size: clamp(17px, 2.2vw, 21px); color: var(--muted); max-width: 680px; margin: 0 auto 32px; }
+.cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.fine { color: var(--muted); font-size: 14px; margin-top: 14px; }
+.shot { margin: 56px auto 0; border-radius: 14px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: 0 30px 80px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.03); }
+
+/* stats */
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line);
+  border: 1px solid var(--line); border-radius: 16px; overflow: hidden; margin: 56px 0 0; }
+.stats div { background: var(--card); padding: 22px 12px; text-align: center; }
+.stats b { display: block; font-size: 32px; font-weight: 800; color: var(--accent); line-height: 1.1; }
+.stats span { color: var(--muted); font-size: 14px; }
+@media (max-width: 640px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+
+/* sections */
+section { padding: 88px 0 0; }
+.eyebrow { color: var(--accent); font-weight: 600; font-size: 14px; letter-spacing: .08em; text-transform: uppercase; }
+h2 { font-size: clamp(28px, 4vw, 42px); letter-spacing: -0.02em; line-height: 1.15; margin: 8px 0 14px; }
+.sub { color: var(--muted); max-width: 640px; margin: 0 0 40px; }
+
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+@media (max-width: 860px) { .grid3 { grid-template-columns: 1fr; } }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 24px; }
+.card .ic { font-size: 28px; margin-bottom: 10px; }
+.card h3 { margin: 0 0 6px; font-size: 19px; }
+.card p { margin: 0; color: var(--muted); font-size: 15.5px; }
+
+/* modules */
+.modules { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+@media (max-width: 760px) { .modules { grid-template-columns: 1fr; } }
+.mod { display: flex; gap: 16px; align-items: flex-start; background: var(--card); border: 1px solid var(--line);
+  border-radius: 14px; padding: 16px 18px; }
+.mod .n { flex: none; width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center;
+  font-weight: 800; background: var(--bg2); color: var(--accent); font-family: "JetBrains Mono", monospace; }
+.mod h4 { margin: 0; font-size: 16.5px; }
+.mod p { margin: 2px 0 0; color: var(--muted); font-size: 14.5px; }
+.mod .proj { display: inline-block; margin-top: 6px; font-size: 13px; color: var(--accent); font-weight: 600; }
+
+/* builds */
+.builds { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+@media (max-width: 760px) { .builds { grid-template-columns: 1fr; } }
+.build { background: var(--card); border: 1px solid var(--line); border-radius: 18px; overflow: hidden;
+  display: flex; flex-direction: column; transition: transform .2s, border-color .2s; }
+.build:hover { transform: translateY(-4px); border-color: var(--accent); }
+.build .pic { background: var(--bg2); height: 300px; display: grid; place-items: center; padding: 20px; overflow: hidden; }
+.build .pic img { max-height: 100%; width: auto; border-radius: 8px; box-shadow: 0 12px 30px rgba(0,0,0,.3); }
+.build .pic.chat { font-family: "JetBrains Mono", monospace; font-size: 14px; padding: 24px; place-items: stretch; }
+.bubble { max-width: 80%; padding: 10px 14px; border-radius: 14px; margin: 6px 0; line-height: 1.45; font-family: Inter, sans-serif; }
+.bubble.me { margin-left: auto; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+.bubble.ai { background: var(--card); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+.build .body { padding: 22px 24px 24px; }
+.build h3 { margin: 0 0 6px; font-size: 20px; }
+.build p { margin: 0 0 12px; color: var(--muted); font-size: 15.5px; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.tags span { font-size: 12.5px; padding: 3px 10px; border-radius: 99px; background: var(--bg2); color: var(--muted); }
+
+/* split */
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; }
+@media (max-width: 860px) { .split { grid-template-columns: 1fr; gap: 28px; } }
+.checks { list-style: none; padding: 0; margin: 0; }
+.checks li { padding: 8px 0 8px 32px; position: relative; }
+.checks li::before { content: "✓"; position: absolute; left: 0; top: 8px; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--glow); color: var(--accent); display: grid; place-items: center; font-size: 13px; font-weight: 800; }
+.term { background: var(--code-bg); color: var(--code-text); border-radius: 14px; padding: 20px 22px;
+  font: 14px/1.7 "JetBrains Mono", monospace; overflow-x: auto; border: 1px solid var(--line); }
+.term .k { color: #ff8f5a; } .term .s { color: #a5d6a7; } .term .c { color: #8a7f78; } .term .ok { color: #81c784; }
+.term .err { color: #ef9a9a; }
+
+/* steps */
+.steps { counter-reset: s; display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+@media (max-width: 860px) { .steps { grid-template-columns: 1fr; } }
+.step { counter-increment: s; position: relative; padding-top: 58px; }
+.step::before { content: counter(s); position: absolute; top: 20px; left: 24px; width: 30px; height: 30px; border-radius: 50%;
+  background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 800; font-size: 15px; }
+
+/* final */
+.final { margin: 96px 0 0; padding: 56px 24px; border-radius: 24px; text-align: center;
+  background: radial-gradient(ellipse at top, var(--glow), transparent 70%), var(--card); border: 1px solid var(--line); }
+.final h2 { margin-top: 0; }
+footer { padding: 48px 0 40px; color: var(--muted); font-size: 14px; }
+footer .wrap { display: flex; gap: 16px; flex-wrap: wrap; justify-content: space-between; }
+footer a { color: var(--muted); }
+
+.theme-btn { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; width: 34px; height: 34px;
+  cursor: pointer; font-size: 15px; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#">🦀 <span>Rust</span> Quest</a>
+    <div class="links">
+      <a class="opt" href="#course">Course</a>
+      <a class="opt" href="#builds">Guided Builds</a>
+      <a class="opt" href="#ai">AI Helper</a>
+      <a href="https://github.com/clawdroppin/rust-quest">GitHub</a>
+      <button class="theme-btn" id="theme" aria-label="Toggle dark mode">◐</button>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="pill">Free · Open source · Windows · No account</div>
+    <h1>Learn to code from zero.<br><em>Build real apps in Rust.</em></h1>
+    <p class="lead">Rust Quest is a desktop app that takes you from "what is a program?" to writing your own
+      desktop apps, with lessons, quizzes and exercises checked by the real Rust compiler.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/clawdroppin/rust-quest/releases/latest/download/RustQuest.exe">⬇ Download for Windows</a>
+      <a class="btn ghost" href="https://github.com/clawdroppin/rust-quest/blob/master/USER_GUIDE.md">Read the user guide</a>
+    </div>
+    <p class="fine">One portable 8&nbsp;MB .exe. Needs <a href="https://rustup.rs">Rust</a> installed (free, 5 minutes).</p>
+    <img class="shot" src="img/course.png" alt="Rust Quest: course map on the left, lesson in the middle, code editor on the right" width="1600" height="875">
+
+    <div class="stats">
+      <div><b>73</b><span>lessons</span></div>
+      <div><b>10</b><span>modules</span></div>
+      <div><b>12</b><span>apps to build</span></div>
+      <div><b>0</b><span>experience needed</span></div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section>
+    <div class="eyebrow">Why it works</div>
+    <h2>Learn by writing code, not watching videos</h2>
+    <p class="sub">Every idea is explained from the ground up, then you practise it straight away in the built-in editor.</p>
+    <div class="grid3">
+      <div class="card"><div class="ic">🧑‍🏫</div><h3>Made for total beginners</h3>
+        <p>No jargon without an explanation. Each lesson builds on the last, and quick checks make sure it stuck.</p></div>
+      <div class="card"><div class="ic">⚙️</div><h3>The real compiler</h3>
+        <p>Press Run and your code is compiled by the Rust you installed. Press Check and tests tell you if you solved it.</p></div>
+      <div class="card"><div class="ic">💡</div><h3>Hints when you're stuck</h3>
+        <p>Each exercise has a hint and a solution, plus a Playground where you can try anything without breaking a thing.</p></div>
+      <div class="card"><div class="ic">🛠️</div><h3>Real tools, real projects</h3>
+        <p>From Module 6 you build Cargo projects in VS Code, with tests to guide you, just like working programmers.</p></div>
+      <div class="card"><div class="ic">🖥️</div><h3>Ends with your own apps</h3>
+        <p>The course finishes with a full budget tracker GUI, then four guided builds you'll actually use.</p></div>
+      <div class="card"><div class="ic">📦</div><h3>Portable and private</h3>
+        <p>One exe, no installer. Progress is saved next to it. No accounts, no tracking, no internet needed.</p></div>
+    </div>
+  </section>
+
+  <section id="course">
+    <div class="eyebrow">The course</div>
+    <h2>From "Hello, world!" to a desktop app</h2>
+    <p class="sub">Ten modules, in order. Projects along the way put each module's ideas to work.</p>
+    <div class="modules">
+      <div class="mod"><div class="n">0</div><div><h4>Getting Started</h4><p>What programs are, your first program, reading compiler errors</p></div></div>
+      <div class="mod"><div class="n">1</div><div><h4>Programming Fundamentals</h4><p>Variables, types, operators, strings, functions, if/else, loops</p></div></div>
+      <div class="mod"><div class="n">2</div><div><h4>Collections of Data</h4><p>Tuples, arrays, Vec, iterating, HashMap, grids</p><span class="proj">Project: grade book</span></div></div>
+      <div class="mod"><div class="n">3</div><div><h4>Ownership &amp; Borrowing</h4><p>Memory, ownership, references, slices, lifetimes, explained gently</p></div></div>
+      <div class="mod"><div class="n">4</div><div><h4>Modeling Data</h4><p>Structs, methods, enums, match, Option</p><span class="proj">Project: game shop inventory</span></div></div>
+      <div class="mod"><div class="n">5</div><div><h4>Handling Errors &amp; Input</h4><p>panic, Result, the ? operator, reading input, custom errors</p><span class="proj">Project: calculator</span></div></div>
+      <div class="mod"><div class="n">6</div><div><h4>Organizing Code</h4><p>Cargo, modules, crates, tests, docs, clippy</p><span class="proj">Projects: guessing game, Hangman</span></div></div>
+      <div class="mod"><div class="n">7</div><div><h4>Abstraction</h4><p>Traits, generics, closures, iterators, smart pointers</p><span class="proj">Project: movie library</span></div></div>
+      <div class="mod"><div class="n">8</div><div><h4>Real Programs</h4><p>Files, JSON, debugging, more collections, time, threads</p><span class="proj">Project: command-line to-do app</span></div></div>
+      <div class="mod"><div class="n">9</div><div><h4>GUI Capstone</h4><p>How GUIs work, egui widgets and layout, app state, background work</p><span class="proj">Project: Pocket Ledger budget app</span></div></div>
+    </div>
+  </section>
+
+  <section id="builds">
+    <div class="eyebrow">Guided Builds</div>
+    <h2>Four apps you'll actually want to use</h2>
+    <p class="sub">After the course, build bigger apps step by step: Rust Quest on one half of the screen, VS Code on the other.
+      Every step explains the design, has <code>todo!()</code>s checked by tests, and ends with ideas to make it yours.</p>
+    <div class="builds">
+      <article class="build">
+        <div class="pic"><img src="img/focus-timer.png" alt="Focus Timer app with a 25:00 progress ring and a weekly bar chart" loading="lazy"></div>
+        <div class="body"><h3>🍅 Focus Timer</h3>
+          <p>A Pomodoro timer with a progress ring, task log, streak counter and weekly chart.</p>
+          <div class="tags"><span>state machines</span><span>Instant &amp; Duration</span><span>custom drawing</span><span>JSON</span></div></div>
+      </article>
+      <article class="build">
+        <div class="pic"><img src="img/note-vault.png" alt="Note Vault app with a note list, Markdown editor and live preview" loading="lazy"></div>
+        <div class="body"><h3>📝 Note Vault</h3>
+          <p>A notes app: Markdown notes as plain files, instant search, #tags, live preview and autosave.</p>
+          <div class="tags"><span>files &amp; folders</span><span>HashSet / BTreeMap</span><span>crates</span></div></div>
+      </article>
+      <article class="build">
+        <div class="pic"><img src="img/file-organizer.png" alt="File Organizer app previewing where each file will be moved" loading="lazy"></div>
+        <div class="body"><h3>🗂 File Organizer</h3>
+          <p>Tidies a messy folder into subfolders by type, shows a preview first, and can undo everything.</p>
+          <div class="tags"><span>std::fs &amp; paths</span><span>careful error handling</span><span>plan, then act</span></div></div>
+      </article>
+      <article class="build">
+        <div class="pic chat" aria-hidden="true"><div>
+          <div class="bubble me">How do I sort a Vec in reverse?</div>
+          <div class="bubble ai">Use <code>v.sort()</code> then <code>v.reverse()</code>, or in one step:<br><code>v.sort_by(|a, b| b.cmp(a))</code></div>
+          <div class="bubble me">Nice, thanks!</div>
+        </div></div>
+        <div class="body"><h3>💬 Local AI Chat</h3>
+          <p>Your own desktop chat app for an AI model running on your PC, with streaming replies and saved conversations.</p>
+          <div class="tags"><span>HTTP &amp; JSON APIs</span><span>worker threads</span><span>channels</span><span>streaming</span></div></div>
+      </article>
+    </div>
+  </section>
+
+  <section id="ai">
+    <div class="split">
+      <div>
+        <div class="eyebrow">Optional AI Helper</div>
+        <h2>A study buddy that runs on your own PC</h2>
+        <p class="sub" style="margin-bottom:20px">Connect Rust Quest to a free local model in LM Studio, Ollama, llama.cpp or Jan.
+          It sees your lesson, your code and the compiler's errors, so you can just ask.</p>
+        <ul class="checks">
+          <li><b>Explain my error</b>, <b>Give me a hint</b>, <b>Review my code</b> in one click</li>
+          <li>"Hints, not full solutions" mode is on by default, so you still do the learning</li>
+          <li>Works offline. Your code never leaves your computer</li>
+          <li>Completely optional: everything works without it</li>
+        </ul>
+      </div>
+      <div class="term" role="img" aria-label="Example of a compiler error and the AI helper explaining it">
+<span class="err">error[E0382]: borrow of moved value: `name`</span>
+<span class="c">  --&gt; src/main.rs:4:20</span>
+<span class="c">   |</span>
+<span class="c"> 3 |     let other = name;</span>
+<span class="c"> 4 |     println!("{}", name);</span>
+
+<span class="k">🤖 AI helper</span>
+`let other = name;` <span class="s">moves</span> the String into `other`,
+so `name` can't be used any more. Remember the
+Ownership lesson: which variable owns the text now?
+Hint: could you <span class="s">borrow</span> it instead of moving it?
+      </div>
+    </div>
+  </section>
+
+  <section id="start">
+    <div class="eyebrow">Get started</div>
+    <h2>Up and running in three steps</h2>
+    <p class="sub">About ten minutes, once. The full walkthrough is in the <a href="https://github.com/clawdroppin/rust-quest/blob/master/USER_GUIDE.md">user guide</a>.</p>
+    <div class="steps">
+      <div class="card step"><h3>Install Rust</h3>
+        <p>Run the installer from <a href="https://rustup.rs">rustup.rs</a>. If it offers the Visual Studio C++ Build Tools, let it install them.</p></div>
+      <div class="card step"><h3>Download Rust Quest</h3>
+        <p>Put <code>RustQuest.exe</code> in its own folder and start it. If SmartScreen warns, choose More info → Run anyway.</p></div>
+      <div class="card step"><h3>Start lesson one</h3>
+        <p>A green ✓ rustc at the top right means you're ready. Later, install VS Code with rust-analyzer for the projects.</p></div>
+    </div>
+  </section>
+
+  <div class="final">
+    <h2>Your first program is ten minutes away.</h2>
+    <p class="sub" style="margin:0 auto 28px">Free and open source, for anyone who's ever wanted to learn to code.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/clawdroppin/rust-quest/releases/latest/download/RustQuest.exe">⬇ Download Rust Quest</a>
+      <a class="btn ghost" href="https://github.com/clawdroppin/rust-quest">View on GitHub</a>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>🦀 Rust Quest · built with Rust and egui</span>
+    <span><a href="https://github.com/clawdroppin/rust-quest/blob/master/USER_GUIDE.md">User guide</a> ·
+      <a href="https://github.com/clawdroppin/rust-quest/releases">Releases</a> ·
+      <a href="https://github.com/clawdroppin/rust-quest/issues">Report a problem</a></span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var root = document.documentElement, key = "rq-theme";
+  try { var t = localStorage.getItem(key); if (t) root.dataset.theme = t; } catch (e) {}
+  document.getElementById("theme").addEventListener("click", function () {
+    var dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    root.dataset.theme = dark ? "light" : "dark";
+    try { localStorage.setItem(key, root.dataset.theme); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>

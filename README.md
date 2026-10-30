@@ -4,7 +4,8 @@ A portable Windows app that teaches programming from zero, in Rust: 73 lessons i
 ending with a complete desktop GUI app (Pocket Ledger, a personal budget tracker), plus a
 **Guided Builds** tab with four bigger apps built step by step, side by side with VS Code.
 
-- **Run it:** `dist/RustQuest.exe`. It's a single file; copy it anywhere. Progress is saved to
+- **Website:** https://clawdroppin.github.io/rust-quest/ · **User guide:** [USER_GUIDE.md](USER_GUIDE.md)
+- **Run it:** download `RustQuest.exe` from [Releases](https://github.com/clawdroppin/rust-quest/releases/latest) (or `dist/RustQuest.exe`). It's a single file; copy it anywhere. Progress is saved to
   `rust_quest_progress.json` next to the exe.
 - **Needs:** Rust installed (`rustc` on PATH or in `~/.cargo/bin`). The app compiles your code with it.
   VS Code (with rust-analyzer) is used from Module 6 on, for Cargo projects.
