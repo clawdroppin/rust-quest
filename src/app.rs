@@ -1,3 +1,4 @@
+use crate::ai;
 use crate::course::{Block, Lesson, Module, Project, Segment, load_course};
 use crate::projects;
 use crate::progress::Progress;
@@ -29,6 +30,54 @@ enum UiAction {
     CompleteAndNext,
 }
 
+/// Ready-made questions for the AI helper.
+#[derive(Clone, Copy)]
+enum Ask {
+    ExplainError,
+    Hint,
+    Review,
+    ExplainLesson,
+}
+
+impl Ask {
+    const ALL: [Ask; 4] = [Ask::ExplainError, Ask::Hint, Ask::Review, Ask::ExplainLesson];
+
+    fn label(self) -> &'static str {
+        match self {
+            Ask::ExplainError => "Explain my error",
+            Ask::Hint => "Give me a hint",
+            Ask::Review => "Review my code",
+            Ask::ExplainLesson => "Explain this lesson simply",
+        }
+    }
+
+    fn question(self) -> &'static str {
+        match self {
+            Ask::ExplainError => "Can you explain the error or failed check I'm getting, and how I could fix it?",
+            Ask::Hint => "I'm stuck. Can you give me a hint for the next step, without giving away the whole answer?",
+            Ask::Review => "Can you review my code? What's good, and what could be clearer or more idiomatic?",
+            Ask::ExplainLesson => "Can you explain the main idea of this lesson in simple words, with a small example?",
+        }
+    }
+}
+
+/// State of the AI helper window.
+#[derive(Default)]
+struct AiPanel {
+    open: bool,
+    chat: Vec<ai::Message>,
+    input: String,
+    stream: Option<ai::Stream>,
+    models: Vec<String>,
+    models_rx: Option<Receiver<Result<Vec<String>, String>>>,
+    /// Result of the last connection test: (ok, message).
+    status: Option<(bool, String)>,
+    show_settings: bool,
+}
+
+/// Which lesson and editor tab a compile job was started from.
+type JobOrigin = (usize, usize, EditorTab);
+
 pub struct RustQuest {
     course: Vec<Module>,
     progress: Progress,
@@ -38,7 +87,10 @@ pub struct RustQuest {
     stdin: String,
     output: Option<RunResult>,
     output_was_check: bool,
-    pending: Option<(Receiver<RunResult>, Option<String>)>,
+    pending: Option<(Receiver<RunResult>, Option<String>, JobOrigin)>,
+    /// Where we were in the other tab (course or guided builds), to return there.
+    other_track: Option<(usize, usize)>,
+    ai: AiPanel,
     rustc: Option<Result<(PathBuf, String), String>>,
     rustc_rx: Option<Receiver<Result<(PathBuf, String), String>>>,
     md_cache: CommonMarkCache,
@@ -90,6 +142,8 @@ impl RustQuest {
             output: None,
             output_was_check: false,
             pending: None,
+            other_track: None,
+            ai: AiPanel::default(),
             rustc: None,
             rustc_rx: Some(rx),
             md_cache: CommonMarkCache::default(),
@@ -101,12 +155,8 @@ impl RustQuest {
             dirty: false,
             last_save: Instant::now(),
         };
-        let (m, l) = app
-            .progress
-            .last_lesson
-            .as_ref()
-            .and_then(|id| app.find_lesson(id))
-            .unwrap_or((0, 0));
+        let last = if app.progress.in_builds { &app.progress.last_build } else { &app.progress.last_lesson };
+        let (m, l) = last.as_ref().and_then(|id| app.find_lesson(id)).unwrap_or((0, 0));
         app.open_lesson(m, l);
         app
     }
@@ -123,10 +173,42 @@ impl RustQuest {
         self.module = m;
         self.lesson = l;
         let has_ex = !self.current().exercises.is_empty();
-        self.progress.last_lesson = Some(self.current().id.clone());
+        let id = Some(self.current().id.clone());
+        let guided = self.course[m].guided;
+        if guided {
+            self.progress.last_build = id;
+        } else {
+            self.progress.last_lesson = id;
+        }
+        self.progress.in_builds = guided;
         self.dirty = true;
         self.scroll_to_top = true;
         self.select_tab(if has_ex { EditorTab::Exercise(0) } else { EditorTab::Playground });
+    }
+
+    fn in_builds(&self) -> bool {
+        self.course[self.module].guided
+    }
+
+    /// Switch between the course and the guided builds, returning to where the learner was.
+    fn switch_track(&mut self) {
+        let to_builds = !self.in_builds();
+        let remembered = if to_builds { &self.progress.last_build } else { &self.progress.last_lesson };
+        let dest = self
+            .other_track
+            .filter(|&(m, _)| self.course[m].guided == to_builds)
+            .or_else(|| remembered.as_ref().and_then(|id| self.find_lesson(id)))
+            .or_else(|| self.course.iter().position(|m| m.guided == to_builds && !m.lessons.is_empty()).map(|m| (m, 0)));
+        if let Some((m, l)) = dest {
+            self.other_track = Some((self.module, self.lesson));
+            self.open_lesson(m, l);
+        }
+    }
+
+    /// The code editor is always shown in the course. In the builds, where the coding
+    /// happens in VS Code, it's hidden unless the learner asks for it.
+    fn show_editor(&self) -> bool {
+        !self.in_builds() || self.progress.show_editor_in_builds || !self.current().exercises.is_empty()
     }
 
     fn select_tab(&mut self, tab: EditorTab) {
@@ -140,12 +222,17 @@ impl RustQuest {
         self.show_solution = false;
     }
 
+    /// Modules in the same tab (course or builds) as the current one.
+    fn same_track(&self, mi: usize) -> bool {
+        self.course[mi].guided == self.in_builds() && !self.course[mi].lessons.is_empty()
+    }
+
     fn next_lesson(&self) -> Option<(usize, usize)> {
         let (m, l) = (self.module, self.lesson);
         if l + 1 < self.course[m].lessons.len() {
             return Some((m, l + 1));
         }
-        (m + 1..self.course.len()).find(|&mi| !self.course[mi].lessons.is_empty()).map(|mi| (mi, 0))
+        (m + 1..self.course.len()).find(|&mi| self.same_track(mi)).map(|mi| (mi, 0))
     }
 
     fn prev_lesson(&self) -> Option<(usize, usize)> {
@@ -153,11 +240,13 @@ impl RustQuest {
         if l > 0 {
             return Some((m, l - 1));
         }
-        (0..m).rev().find(|&mi| !self.course[mi].lessons.is_empty()).map(|mi| (mi, self.course[mi].lessons.len() - 1))
+        (0..m).rev().find(|&mi| self.same_track(mi)).map(|mi| (mi, self.course[mi].lessons.len() - 1))
     }
 
-    fn total_lessons(&self) -> usize {
-        self.course.iter().map(|m| m.lessons.len() + m.planned.len()).sum()
+    /// (completed, total) lessons of the main course or of the builds.
+    fn track_progress(&self, guided: bool) -> (usize, usize) {
+        let lessons = self.course.iter().filter(|m| m.guided == guided).flat_map(|m| &m.lessons);
+        lessons.fold((0, 0), |(done, total), l| (done + self.progress.completed_lessons.contains(&l.id) as usize, total + 1))
     }
 
     /// The editor buffer for the current tab (exercise code is created from the starter on first use).
@@ -202,7 +291,7 @@ impl RustQuest {
             let _ = tx.send(runner::execute(&rustc, &job));
             repaint.request_repaint();
         });
-        self.pending = Some((rx, key));
+        self.pending = Some((rx, key, (self.module, self.lesson, self.tab)));
     }
 
     fn poll(&mut self) {
@@ -212,20 +301,305 @@ impl RustQuest {
             self.rustc = Some(r);
             self.rustc_rx = None;
         }
-        let Some((rx, key)) = &self.pending else { return };
+        self.poll_ai();
+        let Some((rx, key, origin)) = &self.pending else { return };
         let Ok(result) = rx.try_recv() else { return };
+        let origin = *origin;
         if let (Some(key), Some((true, _))) = (key, &result.check) {
             self.progress.passed_exercises.insert(key.clone());
-            let lesson = self.current();
-            let all_passed = (0..lesson.exercises.len()).all(|i| self.progress.passed_exercises.contains(&lesson.exercise_key(i)));
-            if all_passed {
-                let id = lesson.id.clone();
-                self.progress.completed_lessons.insert(id);
+            // The learner may have moved to another lesson while it compiled, so find the
+            // exercise's own lesson from its key ("lesson-id#index").
+            let lesson_id = key.rsplit_once('#').map_or(key.as_str(), |(id, _)| id);
+            if let Some((m, l)) = self.find_lesson(lesson_id) {
+                let lesson = &self.course[m].lessons[l];
+                if (0..lesson.exercises.len()).all(|i| self.progress.passed_exercises.contains(&lesson.exercise_key(i))) {
+                    self.progress.completed_lessons.insert(lesson.id.clone());
+                }
             }
             self.dirty = true;
         }
-        self.output = Some(result);
+        // Only show the result where it was started; elsewhere it would be confusing.
+        if origin == (self.module, self.lesson, self.tab) {
+            self.output = Some(result);
+        }
         self.pending = None;
+    }
+
+    // ---------------------------------------------------------------- AI helper
+
+    fn poll_ai(&mut self) {
+        if let Some(rx) = &self.ai.models_rx
+            && let Ok(result) = rx.try_recv()
+        {
+            self.ai.models_rx = None;
+            match result {
+                Ok(models) if models.is_empty() => {
+                    self.ai.status = Some((false, "Connected, but no model is loaded. Load one in LM Studio first.".into()))
+                }
+                Ok(models) => {
+                    self.ai.status = Some((true, format!("Connected: {} model(s) available.", models.len())));
+                    if !models.contains(&self.progress.ai.model) {
+                        self.progress.ai.model = models[0].clone();
+                        self.dirty = true;
+                    }
+                    self.ai.models = models;
+                }
+                Err(e) => self.ai.status = Some((false, e)),
+            }
+        }
+        let Some(stream) = &self.ai.stream else { return };
+        let mut finished = false;
+        while let Ok(event) = stream.rx.try_recv() {
+            match event {
+                ai::Event::Delta(text) => match self.ai.chat.last_mut() {
+                    Some(m) if m.role == "assistant" => m.content.push_str(&text),
+                    _ => self.ai.chat.push(ai::Message { role: "assistant".into(), content: text, sent: None }),
+                },
+                ai::Event::Done => finished = true,
+                ai::Event::Error(e) => {
+                    self.ai.chat.push(ai::Message { role: "error".into(), content: e, sent: None });
+                    finished = true;
+                }
+            }
+        }
+        if finished {
+            self.ai.stream = None;
+        }
+    }
+
+    /// What the AI should know about where the learner is: lesson, task, code, last result.
+    fn ai_context(&self) -> String {
+        let module = &self.course[self.module];
+        let lesson = self.current();
+        let mut ctx = format!("Context from the app (the learner doesn't see this):\nI'm on \"{}\" › \"{}\".\n", module.title, lesson.title);
+        if let EditorTab::Exercise(i) = self.tab {
+            let ex = &lesson.exercises[i];
+            ctx.push_str(&format!("Exercise \"{}\":\n{}\n", ex.title, ai::shorten(&ex.prompt, 1500)));
+        }
+        if self.show_editor() {
+            let key = match self.tab {
+                EditorTab::Exercise(i) => self.progress.code.get(&lesson.exercise_key(i)).cloned().or_else(|| Some(lesson.exercises[i].starter.clone())),
+                EditorTab::Playground => Some(self.progress.playground.clone()),
+            };
+            if let Some(code) = key {
+                ctx.push_str(&format!("My code in the editor:\n```rust\n{}\n```\n", ai::shorten(&code, 6000)));
+            }
+            if let Some(r) = &self.output {
+                if !r.compile_ok {
+                    ctx.push_str(&format!("The compiler said:\n```text\n{}\n```\n", ai::shorten(&r.compiler_output, 3000)));
+                } else {
+                    if let Some((false, problems)) = &r.check {
+                        ctx.push_str(&format!("The checker said:\n{}\n", ai::shorten(&problems.join("\n"), 2000)));
+                    }
+                    if !r.stdout.is_empty() {
+                        ctx.push_str(&format!("My program printed:\n```text\n{}\n```\n", ai::shorten(&r.stdout, 1500)));
+                    }
+                    if !r.stderr.trim().is_empty() {
+                        ctx.push_str(&format!("Error output:\n```text\n{}\n```\n", ai::shorten(&r.stderr, 1500)));
+                    }
+                }
+            }
+        }
+        for block in &lesson.blocks {
+            if let Block::Project(project) = block
+                && projects::existing_files(project) > 0
+            {
+                ctx.push_str(&format!(
+                    "This step has a Cargo project ({}). My files on disk right now:\n{}",
+                    project.title,
+                    projects::read_sources(project, 12_000)
+                ));
+                break;
+            }
+        }
+        ctx
+    }
+
+    fn ai_send(&mut self, ctx: &egui::Context, question: String) {
+        let question = question.trim().to_string();
+        if question.is_empty() || self.ai.stream.is_some() {
+            return;
+        }
+        let sent = self.progress.ai.include_context.then(|| format!("{}\n\nMy question: {question}", self.ai_context()));
+        self.ai.chat.push(ai::Message { role: "user".into(), content: question, sent });
+        let history: Vec<ai::Message> = self.ai.chat.iter().filter(|m| m.role != "error").cloned().collect();
+        self.ai.stream = Some(ai::start_chat(&self.progress.ai, &history, ctx.clone()));
+        self.ai.open = true;
+    }
+
+    fn ai_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.ai.open;
+        let mut send: Option<String> = None;
+        // The chat area gets a fixed share of the screen: inside a window, "all the
+        // available height" would be the whole screen.
+        let screen = ctx.content_rect();
+        let chat_height = (screen.height() * 0.45).clamp(180.0, 560.0);
+        egui::Window::new("🤖 AI Helper")
+            .open(&mut open)
+            .default_pos(screen.right_top() + egui::vec2(-500.0, 56.0))
+            .default_width(480.0)
+            .min_width(340.0)
+            .show(ctx, |ui| {
+                // Open while it isn't working yet: on a failed connection, or before a model was ever chosen.
+                let not_set_up = match &self.ai.status {
+                    Some((ok, _)) => !ok,
+                    None => self.progress.ai.model.is_empty(),
+                };
+                let settings_open = self.ai.show_settings || not_set_up;
+                egui::CollapsingHeader::new("⚙ Connection")
+                    .id_salt("ai_settings")
+                    .open(Some(settings_open))
+                    .show(ui, |ui| self.ai_settings(ui));
+                if ui.small_button(if settings_open { "Hide connection settings" } else { "Connection settings" }).clicked() {
+                    self.ai.show_settings = !settings_open;
+                }
+                ui.separator();
+
+                egui::ScrollArea::vertical()
+                    .id_salt("ai_chat")
+                    .max_height(chat_height)
+                    .auto_shrink(false)
+                    .stick_to_bottom(true)
+                    .show(ui, |ui| self.ai_chat(ui));
+                ui.separator();
+
+                ui.horizontal_wrapped(|ui| {
+                    for ask in Ask::ALL {
+                        if ui.add_enabled(self.ai.stream.is_none(), egui::Button::new(ask.label()).small()).clicked() {
+                            send = Some(ask.question().to_string());
+                        }
+                    }
+                });
+                let input_id = ai_input_id();
+                let response = ui.add(
+                    egui::TextEdit::multiline(&mut self.ai.input)
+                        .id(input_id)
+                        .desired_rows(2)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("Ask anything… (Ctrl+Enter to send)"),
+                );
+                let ctrl_enter = response.has_focus() && ui.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::Enter));
+                ui.horizontal(|ui| {
+                    if self.ai.stream.is_some() {
+                        ui.spinner();
+                        if ui.button("■ Stop").clicked() {
+                            self.ai.stream = None;
+                        }
+                    } else if ui.button(RichText::new("Send").strong()).clicked() || ctrl_enter {
+                        send = Some(std::mem::take(&mut self.ai.input));
+                    }
+                    if ui.add_enabled(!self.ai.chat.is_empty() && self.ai.stream.is_none(), egui::Button::new("Clear chat")).clicked() {
+                        self.ai.chat.clear();
+                    }
+                    ui.checkbox(&mut self.progress.ai.include_context, "Include my code & errors")
+                        .on_hover_text("Sends the current lesson, your code, the last compiler/checker output and, for project steps, your project files.");
+                });
+            });
+        self.ai.open = open;
+        if let Some(question) = send {
+            self.ai_send(ctx, question);
+        }
+    }
+
+    fn ai_settings(&mut self, ui: &mut egui::Ui) {
+        ui.label(
+            RichText::new(
+                "Use a free AI model running on your own computer, e.g. with LM Studio: download a model \
+                 (like a Qwen Coder or Llama 3 model), then start the local server in its Developer tab. \
+                 Your code is only sent to the address below.",
+            )
+            .small(),
+        );
+        ui.horizontal_wrapped(|ui| {
+            for (name, url) in ai::PRESETS {
+                if ui.selectable_label(self.progress.ai.base_url == url, name).clicked() {
+                    self.progress.ai.base_url = url.to_string();
+                    self.ai.models.clear();
+                    self.ai.status = None;
+                    self.dirty = true;
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Server");
+            if ui.add(egui::TextEdit::singleline(&mut self.progress.ai.base_url).desired_width(240.0)).changed() {
+                self.dirty = true;
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Model");
+            let shown = if self.progress.ai.model.is_empty() { "(first available)" } else { self.progress.ai.model.as_str() };
+            egui::ComboBox::from_id_salt("ai_model").selected_text(ai::shorten(shown, 34)).width(240.0).show_ui(ui, |ui| {
+                for m in &self.ai.models {
+                    if ui.selectable_value(&mut self.progress.ai.model, m.clone(), m).clicked() {
+                        self.dirty = true;
+                    }
+                }
+                if self.ai.models.is_empty() {
+                    ui.label("Press 'Connect' to list the models");
+                }
+            });
+        });
+        ui.horizontal(|ui| {
+            if self.ai.models_rx.is_some() {
+                ui.spinner();
+                ui.label("Connecting…");
+            } else if ui.button("🔌 Connect").clicked() {
+                self.ai.models_rx = Some(ai::list_models_async(self.progress.ai.base_url.clone(), ui.ctx().clone()));
+            }
+            if ui.checkbox(&mut self.progress.ai.hints_only, "Hints, not full solutions").changed() {
+                self.dirty = true;
+            }
+        });
+        if let Some((ok, msg)) = &self.ai.status {
+            ui.label(RichText::new(msg).color(if *ok { GOOD } else { WARN }).small());
+        }
+    }
+
+    fn ai_chat(&mut self, ui: &mut egui::Ui) {
+        if self.ai.chat.is_empty() {
+            ui.label(
+                RichText::new(
+                    "Ask about the lesson, your code, an error, or your project. The helper sees what you're \
+                     working on (if \"Include my code & errors\" is ticked). It can be wrong: treat it like a \
+                     helpful classmate, and check what it says by running your code.",
+                )
+                .weak(),
+            );
+        }
+        let streaming = self.ai.stream.is_some();
+        let last = self.ai.chat.len().saturating_sub(1);
+        for (i, msg) in self.ai.chat.iter().enumerate() {
+            ui.push_id(("ai_msg", i), |ui| match msg.role.as_str() {
+                "user" => {
+                    ui.label(RichText::new("You").strong().color(ACCENT));
+                    ui.label(&msg.content);
+                }
+                "assistant" => {
+                    ui.label(RichText::new("AI helper").strong().color(Color32::from_rgb(130, 170, 255)));
+                    let (thinking, answer, still_thinking) = ai::split_thinking(&msg.content);
+                    if let Some(thinking) = thinking {
+                        egui::CollapsingHeader::new(RichText::new(if still_thinking { "Thinking…" } else { "Thoughts" }).weak().small())
+                            .id_salt("thinking")
+                            .show(ui, |ui| ui.label(RichText::new(thinking).weak().small()));
+                    }
+                    CommonMarkViewer::new().show(ui, &mut self.md_cache, answer);
+                    if !(streaming && i == last) && ui.small_button("📋 Copy").clicked() {
+                        ui.ctx().copy_text(answer.to_string());
+                    }
+                }
+                _ => {
+                    ui.label(RichText::new(format!("⚠ {}", msg.content)).color(WARN));
+                }
+            });
+            ui.add_space(8.0);
+        }
+        if streaming && self.ai.chat.last().is_some_and(|m| m.role == "user") {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(RichText::new("Waiting for the model… (the first answer can take a while while it loads)").weak());
+            });
+        }
     }
 
     // ---------------------------------------------------------------- top bar
@@ -234,12 +608,24 @@ impl RustQuest {
         ui.horizontal(|ui| {
             ui.label(RichText::new("🦀 Rust Quest").size(22.0).strong().color(ACCENT));
             ui.separator();
-            let done = self.progress.completed_lessons.len();
-            let total = self.total_lessons();
-            ui.label(format!("{done} / {total} lessons"));
-            ui.add(egui::ProgressBar::new(done as f32 / total.max(1) as f32).desired_width(180.0).fill(ACCENT));
+            let builds = self.in_builds();
+            let (done, total) = self.track_progress(builds);
+            ui.label(format!("{done} / {total} {}", if builds { "build steps" } else { "lessons" }));
+            ui.add(egui::ProgressBar::new(done as f32 / total.max(1) as f32).desired_width(140.0).fill(ACCENT));
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let ai_label = if self.ai.stream.is_some() { "🤖 AI Helper …" } else { "🤖 AI Helper" };
+                if ui.selectable_label(self.ai.open, ai_label).on_hover_text("Ask a local AI model (LM Studio, Ollama…) for help").clicked() {
+                    self.ai.open = !self.ai.open;
+                }
+                if builds && self.current().exercises.is_empty() {
+                    let label = if self.progress.show_editor_in_builds { "Hide editor" } else { "Show editor" };
+                    if ui.button(label).on_hover_text("In the builds you code in VS Code; the in-app editor is optional").clicked() {
+                        self.progress.show_editor_in_builds = !self.progress.show_editor_in_builds;
+                        self.dirty = true;
+                    }
+                }
+                ui.separator();
                 let zoom = ui.ctx().zoom_factor();
                 if ui.button("A+").on_hover_text("Bigger text (Ctrl +)").clicked() {
                     ui.ctx().set_zoom_factor((zoom + 0.1).min(2.5));
@@ -268,15 +654,34 @@ impl RustQuest {
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         let mut clicked = None;
+        let builds = self.in_builds();
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui.selectable_label(!builds, RichText::new("📚 Course").strong()).clicked() && builds {
+                self.switch_track();
+            }
+            if ui
+                .selectable_label(builds, RichText::new("🛠 Guided Builds").strong())
+                .on_hover_text("Build real, useful apps step by step, side by side with VS Code")
+                .clicked()
+                && !builds
+            {
+                self.switch_track();
+            }
+        });
+        ui.separator();
+        let builds = self.in_builds();
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-            ui.add_space(6.0);
             for (mi, module) in self.course.iter().enumerate() {
+                if module.guided != builds {
+                    continue;
+                }
                 let done = module.lessons.iter().filter(|l| self.progress.completed_lessons.contains(&l.id)).count();
-                let total = module.lessons.len() + module.planned.len();
+                let total = module.lessons.len();
                 let header = RichText::new(format!("{}  ({done}/{total})", module.title)).strong();
                 egui::CollapsingHeader::new(header)
                     .id_salt(("module", mi))
-                    .default_open(mi == self.module || mi <= 1)
+                    .default_open(mi == self.module || mi <= 1 || builds)
                     .show(ui, |ui| {
                         ui.label(RichText::new(module.blurb).small().weak());
                         for (li, lesson) in module.lessons.iter().enumerate() {
@@ -290,10 +695,6 @@ impl RustQuest {
                             if ui.selectable_label(current, text).clicked() {
                                 clicked = Some((mi, li));
                             }
-                        }
-                        for title in module.planned {
-                            ui.label(RichText::new(format!("🔒  {title}")).weak())
-                                .on_hover_text("Coming soon — this lesson hasn't been written yet.");
                         }
                     });
             }
@@ -403,7 +804,12 @@ impl RustQuest {
                 }
             });
             if !has_next && lesson_done {
-                ui.label(RichText::new("🎉 You've finished the whole course! Now go build something of your own.").color(GOOD));
+                let msg = if module_ref.guided {
+                    "🎉 You've finished every guided build! Time to dream up an app of your own: you have all the pieces."
+                } else {
+                    "🎉 You've finished the whole course! Try the 🛠 Guided Builds tab next, or build something of your own."
+                };
+                ui.label(RichText::new(msg).color(GOOD));
             }
             ui.add_space(40.0);
         });
@@ -464,9 +870,14 @@ impl RustQuest {
         egui::Panel::bottom("output").resizable(true).default_size(260.0).min_size(120.0).show(ui, |ui| {
             self.run_controls(ui);
             ui.separator();
-            egui::ScrollArea::vertical().id_salt("output").auto_shrink(false).stick_to_bottom(false).show(ui, |ui| {
-                self.output_view(ui);
-            });
+            let ask = egui::ScrollArea::vertical()
+                .id_salt("output")
+                .auto_shrink(false)
+                .show(ui, |ui| self.output_view(ui))
+                .inner;
+            if ask {
+                self.ai_send(&ui.ctx().clone(), Ask::ExplainError.question().to_string());
+            }
         });
 
         egui::CentralPanel::default().show(ui, |ui| {
@@ -542,26 +953,39 @@ impl RustQuest {
         });
     }
 
-    fn output_view(&self, ui: &mut egui::Ui) {
+    /// Returns true if the learner asked the AI helper about this result.
+    fn output_view(&self, ui: &mut egui::Ui) -> bool {
         let Some(r) = &self.output else {
             ui.label(RichText::new("Press ▶ Run to compile and run your code. Output appears here.").weak());
-            return;
+            return false;
         };
         if let Some(e) = &r.internal_error {
             ui.label(RichText::new(format!("⚠ {e}")).color(BAD));
-            return;
+            return false;
         }
+        let ask_button = |ui: &mut egui::Ui| {
+            ui.add_enabled(self.ai.stream.is_none(), egui::Button::new("🤖 Ask the AI helper about this").small())
+                .on_hover_text("Needs a local AI model, see the AI Helper button at the top")
+                .clicked()
+        };
+        let mut ask = false;
         if !r.compile_ok {
-            ui.label(RichText::new("❌ Your code didn't compile").color(BAD).strong().size(17.0));
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("❌ Your code didn't compile").color(BAD).strong().size(17.0));
+                ask = ask_button(ui);
+            });
             ui.label(RichText::new("Read the FIRST error first. The line after `-->` tells you main.rs:line:column.").small().weak());
             mono(ui, &r.compiler_output, BAD);
-            return;
+            return ask;
         }
         if let Some((passed, problems)) = &r.check {
             if *passed {
                 ui.label(RichText::new("🎉 Exercise passed! Great work.").color(GOOD).strong().size(18.0));
             } else {
-                ui.label(RichText::new("Not quite yet:").color(WARN).strong().size(17.0));
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Not quite yet:").color(WARN).strong().size(17.0));
+                    ask = ask_button(ui);
+                });
                 for p in problems {
                     egui::Frame::group(ui.style()).show(ui, |ui| {
                         ui.set_width(ui.available_width());
@@ -596,7 +1020,12 @@ impl RustQuest {
         if !r.stderr.trim().is_empty() {
             mono(ui, &r.stderr, BAD);
         }
+        ask
     }
+}
+
+fn ai_input_id() -> egui::Id {
+    egui::Id::unique("ai_input")
 }
 
 /// Use Windows' own fonts when available: nicer text, and they cover the symbols and emoji
@@ -825,15 +1254,21 @@ impl eframe::App for RustQuest {
         let ctx = ui.ctx().clone();
         self.poll();
 
-        let (run, check) = ctx.input_mut(|i| {
-            let check = i.consume_key(Modifiers::CTRL | Modifiers::SHIFT, Key::Enter);
-            let run = i.consume_key(Modifiers::CTRL, Key::Enter) || i.consume_key(Modifiers::NONE, Key::F5);
-            (run, check)
-        });
-        if check && matches!(self.tab, EditorTab::Exercise(_)) {
-            self.start_job(&ctx, true);
-        } else if run || check {
-            self.start_job(&ctx, false);
+        let editor = self.show_editor();
+        // Ctrl+Enter in the AI input sends the question instead of running the code.
+        let typing_to_ai = ctx.memory(|m| m.focused()) == Some(ai_input_id());
+        if editor && !typing_to_ai {
+            let (run, check) = ctx.input_mut(|i| {
+                let check = i.consume_key(Modifiers::CTRL | Modifiers::SHIFT, Key::Enter);
+                let run = i.consume_key(Modifiers::CTRL, Key::Enter) || i.consume_key(Modifiers::NONE, Key::F5);
+                (run, check)
+            });
+            let ready = matches!(self.rustc, Some(Ok(_))) && self.pending.is_none();
+            if ready && check && matches!(self.tab, EditorTab::Exercise(_)) {
+                self.start_job(&ctx, true);
+            } else if ready && (run || check) {
+                self.start_job(&ctx, false);
+            }
         }
 
         egui::Panel::top("top").show(ui, |ui| {
@@ -842,9 +1277,14 @@ impl eframe::App for RustQuest {
             ui.add_space(2.0);
         });
         egui::Panel::left("course").resizable(true).default_size(280.0).min_size(200.0).show(ui, |ui| self.sidebar(ui));
-        let width = ui.available_width();
-        egui::Panel::right("editor").resizable(true).default_size(width * 0.42).min_size(340.0).show(ui, |ui| self.editor_panel(ui));
+        if editor {
+            let width = ui.available_width();
+            egui::Panel::right("editor").resizable(true).default_size(width * 0.42).min_size(300.0).show(ui, |ui| self.editor_panel(ui));
+        }
         egui::CentralPanel::default().show(ui, |ui| self.lesson_view(ui));
+        if self.ai.open {
+            self.ai_window(&ctx);
+        }
 
         let zoom = ctx.zoom_factor();
         if (zoom - self.progress.zoom).abs() > 0.001 {

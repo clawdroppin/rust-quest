@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod ai;
 mod app;
 mod course;
 mod progress;
@@ -15,7 +16,7 @@ fn main() -> eframe::Result {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("Rust Quest — Learn to code in Rust")
             .with_inner_size([1440.0, 880.0])
-            .with_min_inner_size([960.0, 600.0])
+            .with_min_inner_size([640.0, 480.0])
             .with_maximized(true),
         ..Default::default()
     };

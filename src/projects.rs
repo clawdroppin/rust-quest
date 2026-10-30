@@ -7,7 +7,13 @@ use std::process::Command;
 const ROOT_NAME: &str = "RustQuestProjects";
 
 /// Next to the exe if that folder is writable, otherwise in Documents.
+/// Worked out once: project cards ask for it every frame.
 pub fn root() -> PathBuf {
+    static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    ROOT.get_or_init(find_root).clone()
+}
+
+fn find_root() -> PathBuf {
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
     {
@@ -63,6 +69,30 @@ pub fn reset(project: &Project) -> std::io::Result<PathBuf> {
         write_file(&target, contents)?;
     }
     Ok(backup)
+}
+
+/// The project's source files as they are on disk now (Cargo.toml and src/*.rs), for the
+/// AI helper. Stops after roughly `max_chars` so small local models aren't overwhelmed.
+pub fn read_sources(project: &Project, max_chars: usize) -> String {
+    let dir = dir_of(project);
+    let mut paths = vec![dir.join("Cargo.toml")];
+    if let Ok(entries) = std::fs::read_dir(dir.join("src")) {
+        let mut rs: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "rs")).collect();
+        rs.sort();
+        paths.extend(rs);
+    }
+    let mut out = String::new();
+    for path in paths {
+        let Ok(text) = std::fs::read_to_string(&path) else { continue };
+        let name = path.strip_prefix(&dir).unwrap_or(&path).display().to_string().replace('\\', "/");
+        let lang = if name.ends_with(".rs") { "rust" } else { "toml" };
+        if out.len() + text.len() > max_chars {
+            out.push_str(&format!("\n({name} and any further files were left out: too long)\n"));
+            break;
+        }
+        out.push_str(&format!("\n{name}:\n```{lang}\n{}\n```\n", text.trim_end()));
+    }
+    out
 }
 
 fn write_file(target: &Path, contents: &str) -> std::io::Result<()> {

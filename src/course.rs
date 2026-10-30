@@ -72,8 +72,8 @@ pub struct Module {
     pub title: &'static str,
     pub blurb: &'static str,
     pub lessons: Vec<Lesson>,
-    /// Lesson titles that are planned but not written yet.
-    pub planned: &'static [&'static str],
+    /// Part of the "Guided Builds" tab instead of the main course.
+    pub guided: bool,
 }
 
 impl Lesson {
@@ -222,7 +222,7 @@ pub fn load_course() -> Vec<Module> {
             title: "0 · Getting Started",
             blurb: "What programs are, and your first one.",
             lessons: lessons!["m0_01_welcome.md", "m0_02_what_is_a_program.md", "m0_03_hello_world.md", "m0_04_compiler_errors.md"],
-            planned: &[],
+            guided: false,
         },
         Module {
             title: "1 · Programming Fundamentals",
@@ -239,7 +239,7 @@ pub fn load_course() -> Vec<Module> {
                 "m1_09_comments_style.md",
                 "m1_10_thinking.md",
             ],
-            planned: &[],
+            guided: false,
         },
         Module {
             title: "2 · Collections of Data",
@@ -254,7 +254,7 @@ pub fn load_course() -> Vec<Module> {
                 "m2_07_grids.md",
                 "m2_08_project_gradebook.md",
             ],
-            planned: &[],
+            guided: false,
         },
         Module {
             title: "3 · Ownership & Borrowing",
@@ -268,7 +268,7 @@ pub fn load_course() -> Vec<Module> {
                 "m3_06_slices.md",
                 "m3_07_lifetimes.md",
             ],
-            planned: &[],
+            guided: false,
         },
         Module {
             title: "4 · Modeling Data",
@@ -282,7 +282,7 @@ pub fn load_course() -> Vec<Module> {
                 "m4_06_if_let.md",
                 "m4_07_project_inventory.md",
             ],
-            planned: &[],
+            guided: false,
         },
         Module {
             title: "5 · Handling Errors & Input",
@@ -295,7 +295,7 @@ pub fn load_course() -> Vec<Module> {
                 "m5_05_custom_errors.md",
                 "m5_06_project_calculator.md",
             ],
-            planned: &[],
+            guided: false,
         },
         Module {
             title: "6 · Organizing Code",
@@ -309,7 +309,7 @@ pub fn load_course() -> Vec<Module> {
                 "m6_06_docs_tools.md",
                 "m6_07_project_hangman.md",
             ],
-            planned: &[],
+            guided: false,
         },
         Module {
             title: "7 · Abstraction",
@@ -324,7 +324,7 @@ pub fn load_course() -> Vec<Module> {
                 "m7_07_smart_pointers.md",
                 "m7_08_project_movies.md",
             ],
-            planned: &[],
+            guided: false,
         },
         Module {
             title: "8 · Real Programs",
@@ -334,9 +334,11 @@ pub fn load_course() -> Vec<Module> {
                 "m8_02_serde.md",
                 "m8_03_structure.md",
                 "m8_04_debugging.md",
+                "m8_06_collections.md",
+                "m8_07_time_threads.md",
                 "m8_05_project_todo.md",
             ],
-            planned: &[],
+            guided: false,
         },
         Module {
             title: "9 · GUI Capstone",
@@ -346,12 +348,44 @@ pub fn load_course() -> Vec<Module> {
                 "m9_02_egui_hello.md",
                 "m9_03_widgets_layout.md",
                 "m9_04_app_state.md",
+                "m9_04b_background.md",
                 "m9_05_ledger_model.md",
                 "m9_06_ledger_gui.md",
                 "m9_07_ledger_save.md",
                 "m9_08_shipping.md",
             ],
-            planned: &[],
+            guided: false,
+        },
+        // ---- Guided Builds: a separate tab of bigger projects, built side by side with VS Code.
+        Module {
+            title: "Start Here",
+            blurb: "How the builds work, and setting up an AI helper.",
+            lessons: lessons!["g0_start.md"],
+            guided: true,
+        },
+        Module {
+            title: "🍅 Focus Timer",
+            blurb: "A Pomodoro timer with a progress ring, task log and weekly stats.",
+            lessons: lessons!["g1_01_timer_model.md", "g1_02_timer_window.md", "g1_03_timer_stats.md"],
+            guided: true,
+        },
+        Module {
+            title: "📝 Note Vault",
+            blurb: "A Markdown notes app with search, #tags, live preview and autosave.",
+            lessons: lessons!["g2_01_vault_model.md", "g2_02_vault_window.md", "g2_03_vault_files.md"],
+            guided: true,
+        },
+        Module {
+            title: "🗂 File Organizer",
+            blurb: "Tidy a messy folder into neat subfolders, with a preview and undo.",
+            lessons: lessons!["g3_01_organizer_plan.md", "g3_02_organizer_window.md", "g3_03_organizer_apply.md"],
+            guided: true,
+        },
+        Module {
+            title: "💬 Local AI Chat",
+            blurb: "Your own desktop chat app for AI models running on your computer.",
+            lessons: lessons!["g4_01_chat_api.md", "g4_02_chat_window.md", "g4_03_chat_conversations.md"],
+            guided: true,
         },
     ]
 }

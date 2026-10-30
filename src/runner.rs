@@ -194,12 +194,31 @@ fn execute_inner(rustc: &Path, job: &Job) -> std::io::Result<RunResult> {
     let dir = work_dir()?;
     let mut res = RunResult::default();
 
+    // A check with tests needs a second, test-mode build. Start it right away on another
+    // thread (in its own folder) so both builds run at the same time.
+    let test_build = match job.check.as_ref().and_then(|c| c.tests.as_ref()) {
+        Some(tests) => {
+            let src = format!(
+                "{}\n\n#[cfg(test)]\n#[allow(unused_imports)]\nmod rust_quest_checks {{\n    use super::*;\n{}\n}}\n",
+                job.code, tests
+            );
+            let test_dir = dir.join("test");
+            std::fs::create_dir_all(&test_dir)?;
+            let rustc = rustc.to_path_buf();
+            Some(std::thread::spawn(move || compile(&rustc, &test_dir, &src, true)))
+        }
+        None => None,
+    };
+
     let compiled = compile(rustc, &dir, &job.code, false)?;
     res.compile_ok = compiled.ok;
     res.compiler_output = compiled.output;
     if !compiled.ok {
         if job.check.is_some() {
             res.check = Some((false, vec!["Your code doesn't compile yet. Fix the errors first.".into()]));
+        }
+        if let Some(build) = test_build {
+            let _ = build.join();
         }
         let _ = std::fs::remove_dir_all(&dir);
         return Ok(res);
@@ -234,12 +253,8 @@ fn execute_inner(rustc: &Path, job: &Job) -> std::io::Result<RunResult> {
                 problems.push(format!("This exercise wants you to use `{r}` in your code."));
             }
         }
-        if let Some(tests) = &check.tests {
-            let src = format!(
-                "{}\n\n#[cfg(test)]\n#[allow(unused_imports)]\nmod rust_quest_checks {{\n    use super::*;\n{}\n}}\n",
-                job.code, tests
-            );
-            let c = compile(rustc, &dir, &src, true)?;
+        if let Some(build) = test_build {
+            let c = build.join().map_err(|_| std::io::Error::other("the test build crashed"))??;
             if !c.ok {
                 problems.push(format!(
                     "Your code runs, but the checker couldn't call your functions. Did you keep the names and parameter types from the task?\n\n{}",
